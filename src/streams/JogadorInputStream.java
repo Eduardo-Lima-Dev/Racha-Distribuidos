@@ -50,13 +50,9 @@ public class JogadorInputStream extends InputStream {
         return jogadores;
     }
 
-    /**
-     * Lê um único Jogador do stream respeitando o length-prefix.
-     */
     private Jogador lerJogador() throws IOException {
-        // Lê e descarta o tamanho (já sabemos o que esperar pelo protocolo)
-        int tamanhoEmBytes = origem.readInt();
-        // Leitura dos atributos na mesma ordem em que foram escritos
+        origem.readInt();
+
         int id = origem.readInt();
         String nome = origem.readUTF();
         Jogador.Posicao posicao = Jogador.Posicao.valueOf(origem.readUTF());
@@ -73,9 +69,6 @@ public class JogadorInputStream extends InputStream {
         return j;
     }
 
-    // --- Implementação obrigatória de InputStream ---
-
-    /** Lê um único byte do stream de origem. */
     @Override
     public int read() throws IOException {
         return origem.read();

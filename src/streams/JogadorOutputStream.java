@@ -47,10 +47,6 @@ public class JogadorOutputStream extends OutputStream {
         this.destino = new DataOutputStream(destino);
     }
 
-    /**
-     * Serializa e envia todos os objetos para o OutputStream de destino.
-     * Deve ser chamado após a construção do stream.
-     */
     public void enviar() throws IOException {
         destino.writeInt(quantidade);
 
@@ -58,35 +54,26 @@ public class JogadorOutputStream extends OutputStream {
             escreverJogador(jogadores[i]);
         }
 
-        destino.flush();
+        flush();
     }
 
-    /**
-     * Serializa um único Jogador com length-prefix (tamanho em bytes antes dos dados).
-     */
     private void escreverJogador(Jogador j) throws IOException {
-        // Serializa para buffer temporário para calcular o tamanho exato
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         DataOutputStream bufferDos = new DataOutputStream(buffer);
 
-        bufferDos.writeInt(j.getId());                   // 4 bytes
-        bufferDos.writeUTF(j.getNome());                 // 2 + len(nome) bytes
-        bufferDos.writeUTF(j.getPosicao().name());       // 2 + len(posicao) bytes
-        bufferDos.writeDouble(j.getSomaNotas());         // 8 bytes
-        bufferDos.writeInt(j.getQtdNotas());             // 4 bytes
+        bufferDos.writeInt(j.getId());
+        bufferDos.writeUTF(j.getNome());
+        bufferDos.writeUTF(j.getPosicao().name());
+        bufferDos.writeDouble(j.getSomaNotas());
+        bufferDos.writeInt(j.getQtdNotas());
         bufferDos.flush();
 
         byte[] dados = buffer.toByteArray();
 
-        // Envia o número de bytes que representam os atributos do objeto
         destino.writeInt(dados.length);
-        // Envia os dados do objeto
         destino.write(dados);
     }
 
-    // --- Implementação obrigatória de OutputStream ---
-
-    /** Delega um byte individual ao destino (permite uso como OutputStream genérico). */
     @Override
     public void write(int b) throws IOException {
         destino.write(b);
