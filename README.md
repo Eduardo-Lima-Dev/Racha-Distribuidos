@@ -32,7 +32,7 @@ sistema-divisao-times/
 
 - [x] Fase 1 — Setup inicial e estrutura de diretórios
 - [x] Fase 2 — Modelagem de dados (POJOs) e interfaces
-- [x] Fase 3 — Streams customizados (`JogadorOutputStream` / `JogadorInputStream`)
-- [x] Fase 4 — Sockets básicos e serialização manual
+- [ ] Fase 3 — Streams customizados (`JogadorOutputStream` / `JogadorInputStream`)
+- [ ] Fase 4 — Sockets básicos e serialização manual
 - [ ] Fase 5 — Servidor multi-threaded (Unicast TCP)
 - [ ] Fase 6 — Multicast UDP e representação externa (JSON)

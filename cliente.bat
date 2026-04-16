@@ -4,7 +4,7 @@ set JAVA=%JAVA_HOME%\bin\java.exe
 
 pushd %~dp0
 
-echo === Cliente TCP ===
-"%JAVA%" -cp "out" network.Cliente
+echo === Cliente Interativo (Fase 5) ===
+"%JAVA%" -cp "out" network.ClienteInterativo
 
 popd

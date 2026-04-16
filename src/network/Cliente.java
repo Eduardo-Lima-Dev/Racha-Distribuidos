@@ -27,12 +27,10 @@ public class Cliente {
         try (Socket socket = new Socket(HOST, Servidor.PORTA)) {
             System.out.println("Conectado!");
 
-            // Empacota e envia requisicao
             JogadorOutputStream jos = new JogadorOutputStream(jogadores, jogadores.length, socket.getOutputStream());
             jos.enviar();
             System.out.println("Enviados " + jogadores.length + " jogadores ao servidor.");
 
-            // Desempacota resposta
             JogadorInputStream jis = new JogadorInputStream(socket.getInputStream());
             Jogador[] resposta = jis.receber();
 

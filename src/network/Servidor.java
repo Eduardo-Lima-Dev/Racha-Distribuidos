@@ -28,7 +28,6 @@ public class Servidor {
 
             System.out.println("Cliente conectado: " + socket.getInetAddress());
 
-            // Desempacota requisicao
             JogadorInputStream jis = new JogadorInputStream(socket.getInputStream());
             Jogador[] recebidos = jis.receber();
 
@@ -37,7 +36,6 @@ public class Servidor {
                 System.out.println("  " + j);
             }
 
-            // Empacota e envia resposta (eco)
             JogadorOutputStream jos = new JogadorOutputStream(recebidos, recebidos.length, socket.getOutputStream());
             jos.enviar();
 
