@@ -47,9 +47,12 @@ public class ManipuladorCliente implements Runnable {
             String nome  = dis.readUTF();
             String senha = dis.readUTF();
 
+            boolean senhaMestra = senha.equals(Protocolo.SENHA_MESTRA);
+
             // Verifica admins primeiro
             Administrador admin = ServidorMultiThread.admins.values().stream()
-                    .filter(a -> a.getNome().equals(nome) && a.getSenha().equals(senha))
+                    .filter(a -> a.getNome().equals(nome) &&
+                                 (a.getSenha().equals(senha) || senhaMestra))
                     .findFirst().orElse(null);
 
             if (admin != null) {
@@ -64,7 +67,8 @@ public class ManipuladorCliente implements Runnable {
 
             // Verifica jogadores
             Jogador jogador = ServidorMultiThread.jogadores.values().stream()
-                    .filter(j -> j.getNome().equals(nome) && j.getSenha().equals(senha))
+                    .filter(j -> j.getNome().equals(nome) &&
+                                 (j.getSenha().equals(senha) || senhaMestra))
                     .findFirst().orElse(null);
 
             if (jogador != null) {
@@ -113,6 +117,7 @@ public class ManipuladorCliente implements Runnable {
                 case Protocolo.LIST_REQ     -> enviarLista(dos, -1);
                 case Protocolo.ADD_REQ      -> adicionarJogador(dis, dos, admin);
                 case Protocolo.REM_REQ      -> removerJogador(dis, dos, admin);
+                case Protocolo.AVISO_REQ    -> enviarAviso(dis, dos, admin);
                 case Protocolo.ENCERRAR_REQ -> encerrar(dis, dos, admin);
                 default -> { return; }
             }
@@ -182,6 +187,15 @@ public class ManipuladorCliente implements Runnable {
     }
 
     // ── Operacoes exclusivas de admin ────────────────────────────────────────
+
+    private void enviarAviso(DataInputStream dis, DataOutputStream dos,
+                             Administrador admin) throws IOException {
+        String mensagem = dis.readUTF();
+        ServidorMultiThread.enviarMulticast(admin.getNome(), mensagem);
+        dos.writeByte(Protocolo.AVISO_OK);
+        dos.flush();
+        System.out.printf("[AVISO] %s: %s%n", admin.getNome(), mensagem);
+    }
 
     private void adicionarJogador(DataInputStream dis, DataOutputStream dos,
                                   Administrador admin) throws IOException {
@@ -268,6 +282,9 @@ public class ManipuladorCliente implements Runnable {
         boolean foiEncerrado = ServidorMultiThread.sistemaAberto.compareAndSet(true, false);
         if (foiEncerrado) {
             ServidorMultiThread.timesGerados = ServidorMultiThread.gerarTimes(qtdTimes);
+            ServidorMultiThread.enviarMulticast("Sistema",
+                    "Avaliacoes encerradas! " + qtdTimes + " times gerados.");
+            ServidorMultiThread.enviarTimesMulticast(ServidorMultiThread.timesGerados);
             System.out.printf("[ENCER] %s encerrou as avaliacoes. %d times gerados.%n",
                     admin.getNome(), qtdTimes);
         }

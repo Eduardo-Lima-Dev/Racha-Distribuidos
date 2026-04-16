@@ -8,7 +8,7 @@ pushd %~dp0
 if not exist "out" mkdir "out"
 
 set FILES=
-for %%f in (src\models\*.java src\streams\*.java src\testes\*.java src\network\*.java) do (
+for %%f in (src\models\*.java src\streams\*.java src\utils\*.java src\testes\*.java src\network\*.java) do (
     set FILES=!FILES! "%%f"
 )
 

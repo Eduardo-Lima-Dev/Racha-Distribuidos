@@ -10,26 +10,25 @@ import java.net.Socket;
 import java.util.Scanner;
 
 /**
- * Cliente TCP interativo da Fase 5.
+ * Cliente TCP interativo da Fase 6.
  *
- * Exibe um menu adaptado ao tipo de usuario autenticado:
- *   - Jogador   : listar jogadores, avaliar, sair
- *   - Administrador: listar, adicionar, remover, encerrar avaliacoes, sair
- *
- * Regra critica de streams:
- *   JogadorInputStream e criado passando o DataInputStream existente (dis),
- *   nunca socket.getInputStream() diretamente — evita criar um segundo
- *   DataInputStream concorrente sobre o mesmo socket.
- *   Nunca chama jis.close() dentro do loop — isso fecharia o socket.
+ * Novidades em relacao a Fase 5:
+ *   - Terminal limpo a cada opcao para evitar scroll excessivo
+ *   - Thread de escuta UDP multicast (recebe avisos do admin em background)
+ *   - Admin pode enviar avisos multicast para todos os clientes conectados
  */
 public class ClienteInterativo {
 
-    private static DataInputStream  dis;
-    private static DataOutputStream dos;
-    private static final Scanner scanner = new Scanner(System.in);
+    private static DataInputStream   dis;
+    private static DataOutputStream  dos;
+    private static ClienteMulticast  multicast;
+    private static final Scanner     scanner = new Scanner(System.in);
 
     public static void main(String[] args) throws IOException {
-        System.out.println("=== Sistema de Divisao de Times ===");
+        limparTela();
+        System.out.println("╔══════════════════════════════════════════╗");
+        System.out.println("║    Sistema de Divisao de Times           ║");
+        System.out.println("╚══════════════════════════════════════════╝");
         System.out.println("Conectando a " + Protocolo.HOST + ":" + Protocolo.PORTA + "...");
 
         try (Socket socket = new Socket(Protocolo.HOST, Protocolo.PORTA)) {
@@ -37,7 +36,7 @@ public class ClienteInterativo {
             dos = new DataOutputStream(socket.getOutputStream());
 
             // ── Login ────────────────────────────────────────────────────────
-            System.out.print("Nome  : ");
+            System.out.print("\nNome  : ");
             String nome  = scanner.nextLine().trim();
             System.out.print("Senha : ");
             String senha = scanner.nextLine().trim();
@@ -49,20 +48,26 @@ public class ClienteInterativo {
 
             byte resp = dis.readByte();
             if (resp == Protocolo.LOGIN_FAIL) {
-                System.out.println("[ERRO] " + dis.readUTF());
+                System.out.println("\n[ERRO] " + dis.readUTF());
                 return;
             }
 
             int  meuId = dis.readInt();
             byte tipo  = dis.readByte();
 
+            // Inicia escuta de avisos multicast em background
+            multicast = new ClienteMulticast();
+            Thread tMulticast = new Thread(multicast);
+            tMulticast.setDaemon(true);
+            tMulticast.start();
+
             if (tipo == Protocolo.TIPO_ADMIN) {
-                System.out.println("Autenticado como Administrador. Bem-vindo, " + nome + "!");
-                menuAdmin();
+                menuAdmin(nome);
             } else {
-                System.out.println("Autenticado como Jogador. Bem-vindo, " + nome + "!");
-                menuJogador(meuId);
+                menuJogador(meuId, nome);
             }
+
+            multicast.parar();
         }
     }
 
@@ -70,19 +75,23 @@ public class ClienteInterativo {
     // Menu Jogador
     // ─────────────────────────────────────────────────────────────────────────
 
-    static void menuJogador(int meuId) throws IOException {
+    static void menuJogador(int meuId, String nome) throws IOException {
         while (true) {
-            System.out.println("\n--- Menu do Jogador ---");
-            System.out.println("1. Listar jogadores");
-            System.out.println("2. Avaliar jogador");
-            System.out.println("0. Sair");
+            limparTela();
+            System.out.println("╔══════════════════════════════════════════╗");
+            System.out.printf( "║  Jogador: %-32s║%n", nome);
+            System.out.println("╠══════════════════════════════════════════╣");
+            System.out.println("║  1. Listar jogadores                     ║");
+            System.out.println("║  2. Avaliar jogador                      ║");
+            System.out.println("║  0. Sair                                 ║");
+            System.out.println("╚══════════════════════════════════════════╝");
             System.out.print("> ");
 
             switch (scanner.nextLine().trim()) {
-                case "1" -> listarJogadores();
-                case "2" -> avaliar(meuId);
+                case "1" -> { limparTela(); listarJogadores(); aguardar(); }
+                case "2" -> { limparTela(); avaliar(meuId);    aguardar(); }
                 case "0" -> { logout(); return; }
-                default  -> System.out.println("Opcao invalida.");
+                default  -> { System.out.println("Opcao invalida."); aguardar(); }
             }
         }
     }
@@ -91,23 +100,29 @@ public class ClienteInterativo {
     // Menu Administrador
     // ─────────────────────────────────────────────────────────────────────────
 
-    static void menuAdmin() throws IOException {
+    static void menuAdmin(String nome) throws IOException {
         while (true) {
-            System.out.println("\n--- Menu do Administrador ---");
-            System.out.println("1. Listar jogadores");
-            System.out.println("2. Adicionar jogador");
-            System.out.println("3. Remover jogador");
-            System.out.println("4. Encerrar avaliacoes e gerar times");
-            System.out.println("0. Sair");
+            limparTela();
+            System.out.println("╔══════════════════════════════════════════╗");
+            System.out.printf( "║  Admin: %-34s║%n", nome);
+            System.out.println("╠══════════════════════════════════════════╣");
+            System.out.println("║  1. Listar jogadores                     ║");
+            System.out.println("║  2. Adicionar jogador                    ║");
+            System.out.println("║  3. Remover jogador                      ║");
+            System.out.println("║  4. Enviar aviso (multicast)             ║");
+            System.out.println("║  5. Encerrar avaliacoes e gerar times    ║");
+            System.out.println("║  0. Sair                                 ║");
+            System.out.println("╚══════════════════════════════════════════╝");
             System.out.print("> ");
 
             switch (scanner.nextLine().trim()) {
-                case "1" -> listarJogadores();
-                case "2" -> adicionarJogador();
-                case "3" -> removerJogador();
-                case "4" -> encerrar();
+                case "1" -> { limparTela(); listarJogadores();  aguardar(); }
+                case "2" -> { limparTela(); adicionarJogador(); aguardar(); }
+                case "3" -> { limparTela(); removerJogador();   aguardar(); }
+                case "4" -> { limparTela(); enviarAviso();      aguardar(); }
+                case "5" -> { limparTela(); encerrar();         aguardar(); }
                 case "0" -> { logout(); return; }
-                default  -> System.out.println("Opcao invalida.");
+                default  -> { System.out.println("Opcao invalida."); aguardar(); }
             }
         }
     }
@@ -126,7 +141,6 @@ public class ClienteInterativo {
             return;
         }
 
-        // Passa dis existente — nao cria novo DataInputStream sobre o socket
         JogadorInputStream jis = new JogadorInputStream(dis);
         Jogador[] lista = jis.receber();
 
@@ -135,8 +149,7 @@ public class ClienteInterativo {
             return;
         }
 
-        System.out.println();
-        System.out.printf("%-5s %-14s %-12s %s%n", "ID", "Nome", "Posicao", "Media");
+        System.out.printf("%n%-5s %-14s %-12s %s%n", "ID", "Nome", "Posicao", "Media");
         System.out.println("-".repeat(42));
         for (Jogador j : lista) {
             System.out.printf("%-5d %-14s %-12s %.2f%n",
@@ -177,15 +190,35 @@ public class ClienteInterativo {
 
         byte resp = dis.readByte();
         if (resp == Protocolo.AVALIAR_OK) {
-            System.out.println("[OK] Avaliacao registrada com sucesso!");
+            System.out.println("\n[OK] Avaliacao registrada com sucesso!");
         } else {
-            System.out.println("[ERRO] " + dis.readUTF());
+            System.out.println("\n[ERRO] " + dis.readUTF());
         }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Operacoes do Administrador
     // ─────────────────────────────────────────────────────────────────────────
+
+    static void enviarAviso() throws IOException {
+        System.out.print("Mensagem para todos os clientes: ");
+        String mensagem = scanner.nextLine().trim();
+        if (mensagem.isEmpty()) {
+            System.out.println("Mensagem vazia. Operacao cancelada.");
+            return;
+        }
+
+        dos.writeByte(Protocolo.AVISO_REQ);
+        dos.writeUTF(mensagem);
+        dos.flush();
+
+        byte resp = dis.readByte();
+        if (resp == Protocolo.AVISO_OK) {
+            System.out.println("\n[OK] Aviso enviado via multicast UDP!");
+        } else {
+            System.out.println("\n[ERRO] " + dis.readUTF());
+        }
+    }
 
     static void adicionarJogador() throws IOException {
         System.out.print("Nome    : ");
@@ -204,9 +237,9 @@ public class ClienteInterativo {
         byte resp = dis.readByte();
         if (resp == Protocolo.ADD_OK) {
             int novoId = dis.readInt();
-            System.out.println("[OK] Jogador '" + nome + "' adicionado com id=" + novoId);
+            System.out.println("\n[OK] Jogador '" + nome + "' adicionado com id=" + novoId);
         } else {
-            System.out.println("[ERRO] " + dis.readUTF());
+            System.out.println("\n[ERRO] " + dis.readUTF());
         }
     }
 
@@ -229,9 +262,9 @@ public class ClienteInterativo {
 
         byte resp = dis.readByte();
         if (resp == Protocolo.REM_OK) {
-            System.out.println("[OK] Jogador removido.");
+            System.out.println("\n[OK] Jogador removido.");
         } else {
-            System.out.println("[ERRO] " + dis.readUTF());
+            System.out.println("\n[ERRO] " + dis.readUTF());
         }
     }
 
@@ -259,20 +292,19 @@ public class ClienteInterativo {
         byte resp = dis.readByte();
 
         if (resp == Protocolo.ENCERRAR_FAIL) {
-            System.out.println("[ERRO] " + dis.readUTF());
+            System.out.println("\n[ERRO] " + dis.readUTF());
             return;
         }
 
         if (resp == Protocolo.ENCERRAR_RESP) {
             int qtd = dis.readInt();
-            System.out.println("\n==============================");
-            System.out.println(" AVALIACOES ENCERRADAS        ");
-            System.out.println("==============================");
+            System.out.println("\n══════════════════════════════════════════");
+            System.out.println("  AVALIACOES ENCERRADAS — TIMES GERADOS   ");
+            System.out.println("══════════════════════════════════════════");
 
             for (int i = 0; i < qtd; i++) {
                 int numero = dis.readInt();
 
-                // Passa dis existente — nao cria novo DataInputStream
                 JogadorInputStream jis = new JogadorInputStream(dis);
                 Jogador[] membros = jis.receber();
 
@@ -287,17 +319,30 @@ public class ClienteInterativo {
                             j.getNome(), j.getPosicao(), j.getNotaMedia());
                 }
             }
-            System.out.println("\n==============================");
+            System.out.println("\n══════════════════════════════════════════");
         }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Logout
+    // Utilitarios de UI
     // ─────────────────────────────────────────────────────────────────────────
 
     static void logout() throws IOException {
         dos.writeByte(Protocolo.LOGOUT);
         dos.flush();
+        limparTela();
         System.out.println("Ate logo!");
+    }
+
+    /** Limpa o terminal usando codigos ANSI (suportado no Windows 10/11+). */
+    static void limparTela() {
+        System.out.print("\033[H\033[2J\033[3J");
+        System.out.flush();
+    }
+
+    /** Pausa a execucao ate o usuario pressionar Enter. */
+    static void aguardar() {
+        System.out.print("\nPressione Enter para continuar...");
+        scanner.nextLine();
     }
 }

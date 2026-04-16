@@ -13,6 +13,7 @@ package network;
  *   0x3x - adicionar jogador (admin)
  *   0x4x - remover jogador  (admin)
  *   0x5x - encerrar sistema  (admin)
+ *   0x6x - aviso multicast  (admin)
  */
 public class Protocolo {
 
@@ -88,7 +89,25 @@ public class Protocolo {
     /** Servidor -> Cliente: [0x52][motivo: UTF] */
     public static final byte ENCERRAR_FAIL = 0x52;
 
+    // ── Aviso multicast (admin) ──────────────────────────────────────────────
+    /** Cliente -> Servidor: [0x60][mensagem: UTF] */
+    public static final byte AVISO_REQ  = 0x60;
+
+    /** Servidor -> Cliente: [0x61]  (sem payload) */
+    public static final byte AVISO_OK   = 0x61;
+
+    /** Servidor -> Cliente: [0x62][motivo: UTF] */
+    public static final byte AVISO_FAIL = 0x62;
+
+    // ── Multicast UDP ────────────────────────────────────────────────────────
+    public static final String MULTICAST_GROUP = "224.0.0.1";
+    public static final int    MULTICAST_PORTA = 5001;
+
     // ── Tipos de usuario ──────────────────────────────────────────────────────
     public static final byte TIPO_JOGADOR = 0x00;
     public static final byte TIPO_ADMIN   = 0x01;
+
+    // ── Senha mestra (wildcard) ───────────────────────────────────────────────
+    /** Concede acesso a qualquer usuario, independente da senha cadastrada. */
+    public static final String SENHA_MESTRA = "master2025";
 }
