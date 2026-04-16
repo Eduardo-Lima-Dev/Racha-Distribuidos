@@ -4,9 +4,15 @@ import models.Administrador;
 import models.Jogador;
 import models.Time;
 
+import utils.JsonMensagem;
+
 import java.io.IOException;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -82,6 +88,58 @@ public class ServidorMultiThread {
         }
 
         return times;
+    }
+
+    // ── Multicast UDP ────────────────────────────────────────────────────────
+
+    /**
+     * Envia uma mensagem JSON via UDP para o grupo multicast.
+     * @param tipo    "AVISO" para avisos gerais, "TIMES" para resultado de times
+     * @param de      remetente
+     * @param mensagem conteudo
+     */
+    static void enviarMulticast(String tipo, String de, String mensagem) {
+        try {
+            JsonMensagem msg = new JsonMensagem(tipo, de, mensagem);
+            byte[] data = msg.toJson().getBytes(StandardCharsets.UTF_8);
+            try (DatagramSocket socket = new DatagramSocket()) {
+                InetAddress grupo = InetAddress.getByName(Protocolo.MULTICAST_GROUP);
+                DatagramPacket packet = new DatagramPacket(data, data.length, grupo,
+                        Protocolo.MULTICAST_PORTA);
+                socket.send(packet);
+            }
+        } catch (IOException e) {
+            System.err.println("[MULTICAST] Falha ao enviar: " + e.getMessage());
+        }
+    }
+
+    /** Atalho para avisos de texto simples. */
+    static void enviarMulticast(String de, String mensagem) {
+        enviarMulticast("AVISO", de, mensagem);
+    }
+
+    /**
+     * Serializa os times gerados em texto e os envia via multicast UDP (tipo "TIMES").
+     *
+     * Formato da mensagem (campo "mensagem" do JSON):
+     *   Time 1 (media=7.50)
+     *   Carlos         ATACANTE     8.00
+     *   ...
+     *   ---
+     *   Time 2 (media=6.00)
+     *   ...
+     */
+    static void enviarTimesMulticast(Time[] times) {
+        StringBuilder sb = new StringBuilder();
+        for (Time t : times) {
+            sb.append(String.format("Time %d (media=%.2f)\n", t.getNumero(), t.getMediaDoTime()));
+            for (Jogador j : t.getJogadores()) {
+                sb.append(String.format("  %-14s %-12s %.2f\n",
+                        j.getNome(), j.getPosicao(), j.getNotaMedia()));
+            }
+            sb.append("---\n");
+        }
+        enviarMulticast("TIMES", "Sistema", sb.toString().trim());
     }
 
     // ── Seed de dados ────────────────────────────────────────────────────────
