@@ -1,10 +1,17 @@
 # Sistema de Divisão de Times
 
-Projeto da disciplina de **Sistemas Distribuídos** — implementação completa de comunicação entre processos com sockets TCP/UDP, streams customizados e serialização manual em Java puro (sem frameworks externos).
+Projeto da disciplina de **Sistemas Distribuídos** (QXD0043 — UFC Quixadá). Implementa um serviço remoto de ranqueamento e divisão de times de futebol em duas iterações:
+
+- **Trabalho 1** (`network/`): protocolo binário sobre TCP + multicast UDP, com serialização manual via streams customizados.
+- **Trabalho 2** (`rmi/`, `marshalling/`, `server/`, `client/`): reimplementação sobre **Java RMI** com protocolo requisição-resposta explícito (Coulouris, seção 5.2) e representação externa em JSON manual.
+
+A arquitetura ativa **é a do Trabalho 2**. Os pacotes do Trabalho 1 são mantidos no repositório como referência histórica.
+
+---
 
 ## Tema
 
-Sistema de **ranqueamento anônimo de jogadores de futebol**. Durante o período aberto, jogadores autenticados avaliam uns aos outros com notas de 0 a 10. Ao encerrar as avaliações, o servidor calcula a média de cada jogador e divide os participantes em times balanceados automaticamente usando o algoritmo *snake draft*. O resultado é transmitido em tempo real para todos os clientes conectados via multicast UDP.
+Sistema de **ranqueamento anônimo de jogadores de futebol**. Durante o período aberto, jogadores autenticados avaliam uns aos outros com notas de 0 a 10. Ao encerrar as avaliações, o servidor calcula a média de cada jogador e divide os participantes em times balanceados via algoritmo *snake draft*. O resultado é entregue a todos os clientes conectados por **callback RMI** (`NotificadorCliente`).
 
 **Usuários do sistema:**
 
@@ -25,203 +32,169 @@ Sistema de **ranqueamento anônimo de jogadores de futebol**. Durante o período
 | Ana      | senha4    | Jogador (MEIO_CAMPO)|
 | Pedro    | senha5    | Jogador (ATACANTE)  |
 
-> Senha mestra `master2025` concede acesso a qualquer conta cadastrada.
+> Senha mestra `rachao2025` concede acesso a qualquer conta cadastrada.
 
 ---
 
-## Streams
+## Arquitetura RMI (Trabalho 2)
 
-O projeto implementa streams customizados seguindo o **padrão Decorator** da API `java.io`, sem usar `Serializable`.
-
-### `JogadorOutputStream` — serialização
-
-Subclasse de `OutputStream`. Serializa um `Jogador[]` para qualquer destino (`System.out`, `FileOutputStream`, socket TCP).
-
-**Protocolo binário por objeto:**
+### Camadas
 
 ```
-[int: quantidade de objetos]
-Para cada objeto:
-  [int:    tamanhoEmBytes]   ← tamanho do bloco a seguir
-  [int:    id]               4 bytes
-  [UTF:    nome]             2 + n bytes
-  [UTF:    posicao]          2 + n bytes
-  [double: somaNotas]        8 bytes
-  [int:    qtdNotas]         4 bytes
+src/
+├── models/         entidades de domínio (Usuario, Jogador, Administrador,
+│                   Avaliacao, Time, Racha, Sessao) e a interface Avaliavel
+├── rmi/            interfaces Remote + estruturas de mensagem do protocolo
+│                   (RequestMessage, ReplyMessage, RemoteObjectRef)
+├── marshalling/    Marshaller + parser/writer JSON (Json)
+├── utils/          parser JSON adicional usado pelo servidor (utils.Json)
+├── server/         dispatcher do servidor (ServicoRachaImpl, SessaoRemotaImpl,
+│                   EstadoServidor, MainServidor)
+├── client/         primitiva doOperation (ClienteRMI), CLI interativa
+│                   (ClienteInterativo) e callback (NotificadorImpl)
+└── testes/         TesteMarshalling, TesteRMIDummy, TesteIntegracao
 ```
 
-O campo `tamanhoEmBytes` é calculado serializando o objeto em um `ByteArrayOutputStream` interno antes de escrevê-lo no destino — isso permite ao receptor pular objetos sem precisar conhecer sua estrutura completa.
+### Objetos remotos
 
-### `JogadorInputStream` — desserialização
+| Objeto remoto       | Nome no Registry         | Quem exporta | Papel                                              |
+|---------------------|--------------------------|--------------|----------------------------------------------------|
+| `ServicoRacha`      | `ServicoRacha` (fixo)    | Servidor     | Entrada do sistema — trata LOGIN                   |
+| `SessaoRemota`      | `Sessao:{id}` (1 por login) | Servidor  | Demais métodos (autenticados)                      |
+| `NotificadorCliente`| anônimo (stub local)     | Cliente      | Callback de avisos e times (passagem por referência)|
 
-Subclasse de `InputStream`. Lê o mesmo protocolo acima e reconstrói o `Jogador[]`. O `readInt()` inicial de cada objeto descarta `tamanhoEmBytes` (campo de controle) antes de ler os atributos na mesma ordem em que foram escritos.
+A passagem por referência é demonstrada **três vezes**: o cliente faz `Naming.lookup("ServicoRacha")`; o servidor devolve no JSON do LOGIN o nome `"Sessao:N"` (cliente faz novo lookup); o cliente exporta um `NotificadorImpl` e entrega o stub ao servidor via `SessaoRemota.registrarNotificador(stub)`.
 
-**Regra crítica de uso:** ambos os streams recebem o `DataInputStream`/`DataOutputStream` **já existente** do socket no construtor. Nunca são fechados dentro do loop de serviço — fechar o stream wrapper fecharia o socket subjacente.
+### Protocolo requisição-resposta (Coulouris, Fig. 5.4)
+
+```
+Cliente                                                Servidor
+─────────                                              ─────────
+doOperation(ref, methodId, args)                       ServicoRachaImpl / SessaoRemotaImpl
+  monta RequestMessage                                   invocar(byte[] req)
+  {                                                        getRequest()    ← desempacota
+    "messageType": 0,                                      select object   ← dispatcher por methodId
+    "requestId":   N,                                      execute method  ← lógica de negócio
+    "objectReference": "ServicoRacha" | "Sessao:N",        sendReply()     ← empacota result
+    "methodId": M,
+    "args": { ... }
+  }
+  → stub.invocar(reqBytes)
+                                                       ReplyMessage
+                                                       {
+                                                         "messageType": 1,
+                                                         "requestId":   N,
+                                                         "ok": true,
+                                                         "result": { "ok": true|false, ... }
+                                                       }
+  desempacota, valida requestId,
+  devolve só o payload "result"
+```
+
+### Tabela de `methodId`
+
+| ID | Objeto         | Método             | Perfil   | `args`                                          | `result`                              |
+|---:|----------------|--------------------|----------|------------------------------------------------|---------------------------------------|
+| 1  | ServicoRacha   | LOGIN              | qualquer | `{nome, senha}`                                | `{ok, sessaoRef, tipo, idUsuario}`    |
+| 2  | SessaoRemota   | LISTAR_JOGADORES   | qualquer | `{}`                                           | `{ok, jogadores:[...], sistemaAberto}`|
+| 3  | SessaoRemota   | AVALIAR            | jogador  | `{idAvaliado, nota}`                           | `{ok}` ou `{ok:false, erro}`          |
+| 4  | SessaoRemota   | ADICIONAR_JOGADOR  | admin    | `{nome, senha, posicao}`                       | `{ok, id}`                            |
+| 5  | SessaoRemota   | REMOVER_JOGADOR    | admin    | `{id}`                                         | `{ok}`                                |
+| 6  | SessaoRemota   | ENVIAR_AVISO       | admin    | `{mensagem}`                                   | `{ok}`                                |
+| 7  | SessaoRemota   | ENCERRAR_AVALIACOES| admin    | `{qtdTimes}`                                   | `{ok, racha:{id, qtdTimes, times:[...]}}` |
+| 8  | SessaoRemota   | LOGOUT             | qualquer | `{}`                                           | `{ok}`                                |
+
+`SessaoRemota.registrarNotificador(NotificadorCliente)` é um método remoto Java **direto** (não passa por `methodId`): demonstra a passagem do stub do cliente por referência.
+
+### Passagem por valor
+
+Todos os payloads dentro de `args` e `result` são serializados em **JSON UTF-8** pelo `Marshaller` / `utils.Json`. Não é usado `java.io.Serializable` em nenhum lugar do trabalho — a representação externa é totalmente controlada por nós.
 
 ---
 
-## Serialização
+## Modelagem de domínio
 
-### Protocolo binário TCP
+```
+Usuario  (id, nome, senha)
+   ↑
+   ├── Jogador        (implements Avaliavel; tem Posicao, somaNotas, qtdNotas)
+   └── Administrador  (tem nivelAcesso)
 
-Toda a comunicação cliente-servidor usa um protocolo binário customizado sobre TCP com **opcodes de 1 byte** seguidos de payload estruturado:
-
-| Família   | Opcode              | Direção | Payload                                                             |
-| --------- | ------------------- | ------- | ------------------------------------------------------------------- |
-| Auth      | `0x01` LOGIN_REQ    | C→S     | `[nome: UTF][senha: UTF]`                                           |
-| Auth      | `0x02` LOGIN_OK     | S→C     | `[id: int][tipo: byte]`                                             |
-| Auth      | `0x03` LOGIN_FAIL   | S→C     | `[motivo: UTF]`                                                     |
-| List      | `0x10` LIST_REQ     | C→S     | —                                                                   |
-| List      | `0x11` LIST_RESP    | S→C     | payload `JogadorOutputStream`                                       |
-| Eval      | `0x20` AVALIAR_REQ  | C→S     | `[idAvaliado: int][nota: double]`                                   |
-| Add       | `0x30` ADD_REQ      | C→S     | `[nome: UTF][senha: UTF][posicao: UTF]`                             |
-| Remove    | `0x40` REM_REQ      | C→S     | `[id: int]`                                                         |
-| Close     | `0x50` ENCERRAR_REQ | C→S     | `[qtdTimes: int]`                                                   |
-| Close     | `0x51` ENCERRAR_RESP | S→C     | `[qtd: int]` + N × `[numero: int]` + payload `JogadorOutputStream` |
-| Broadcast | `0x60` AVISO_REQ    | C→S     | `[mensagem: UTF]`                                                   |
-| Logout    | `0x00` LOGOUT       | C→S     | —                                                                   |
-
-### JSON manual (UDP multicast)
-
-Mensagens UDP usam JSON serializado manualmente pela classe `JsonMensagem` — sem dependências externas. Formato fixo:
-
-```json
-{"tipo":"AVISO","de":"admin","mensagem":"Texto aqui","hora":"14:30:00"}
+Avaliacao  (idAvaliador, idAvaliado, nota)
+Time       (numero; TEM-UMA List<Jogador>)
+Racha      (id, data; TEM-UMA List<Time>)         ← agregação em cadeia: Racha → Time → Jogador
+Sessao     (id, criadaEm; TEM-UM Usuario; rastreia requestId)
 ```
 
-Tipos de mensagem multicast:
+**Mapeamento das exigências do enunciado:**
 
-| `tipo` | Uso |
-|--------|-----|
-| `"AVISO"` | Aviso de texto livre enviado pelo administrador |
-| `"TIMES"` | Times gerados ao encerrar as avaliações (texto formatado multi-linha) |
-
-A serialização escapa `\`, `"`, `\n`, `\r`. A desserialização (`extrair()`) faz o caminho inverso, reconstruindo os caracteres de controle corretamente.
+| Requisito                          | Atendimento                                                             |
+|------------------------------------|-------------------------------------------------------------------------|
+| ≥ 4 entidades                      | `Usuario`, `Jogador`, `Administrador`, `Time`, `Racha`, `Avaliacao`, `Sessao` |
+| ≥ 2 "é-um" (extensão)              | `Jogador extends Usuario`, `Administrador extends Usuario`              |
+| ≥ 2 "tem-um" (agregação)           | `Time` tem `List<Jogador>`, `Racha` tem `List<Time>`, `Sessao` tem `Usuario` |
+| ≥ 4 métodos remotos                | 8 `methodId`s + `registrarNotificador`                                  |
+| Passagem por referência            | `ServicoRacha`, `SessaoRemota`, `NotificadorCliente` (todos `Remote`)   |
+| Passagem por valor + repr. externa | DTOs em JSON UTF-8 dentro de `args`/`result`                            |
 
 ---
-
-## Conexões
-
-### Arquitetura TCP (unicast)
-
-```
-Cliente 1 ──┐
-Cliente 2 ──┤── ServerSocket :5000 ── aceita() ──► ManipuladorCliente (Thread)
-Cliente N ──┘                                              │
-                                                   Estado compartilhado
-                                                   (ConcurrentHashMap)
-```
-
-- **`ServidorMultiThread`** — abre `ServerSocket` na porta `5000`; para cada `accept()` cria um `Thread` com `ManipuladorCliente` como `Runnable`. Threads são *daemon* para encerrar com o processo principal.
-- **`ManipuladorCliente`** — trata uma conexão completa: login → loop de serviço (jogador ou admin) → logout/desconexão. Usa `try-with-resources` no socket para garantir fechamento.
-- **Estado compartilhado thread-safe:**
-  - `ConcurrentHashMap<Integer, Jogador>` — jogadores registrados
-  - `ConcurrentHashMap<String, Boolean> avaliacoesFeitas` — chave `"avaliadorId-avaliadoId"` previne duplicatas com `putIfAbsent` (operação atômica)
-  - `AtomicBoolean sistemaAberto` — controla janela de avaliações; `compareAndSet(true, false)` garante que apenas o primeiro `ENCERRAR_REQ` gera os times
-  - `synchronized(avaliado)` — lock por objeto ao acumular nota, evitando race condition na soma
-
-### Balanceamento de times (*snake draft*)
-
-Jogadores são ordenados por média decrescente e distribuídos em zigue-zague entre os times:
-
-```
-Rodada par   → Time 1 → Time 2 → ... → Time N
-Rodada ímpar → Time N → ... → Time 2 → Time 1
-```
-
-Isso minimiza a diferença de média entre os times sem precisar de busca exaustiva.
-
----
-
-## Multicasting
-
-### Arquitetura UDP multicast
-
-```
-Servidor ──► DatagramSocket ──► grupo 224.0.0.1:5001
-                                        │
-                    ┌───────────────────┼───────────────────┐
-                    ▼                   ▼                   ▼
-             ClienteMulticast   ClienteMulticast   ClienteMulticast
-             (Thread daemon)    (Thread daemon)    (Thread daemon)
-```
-
-- **Endereço de grupo:** `224.0.0.1` (classe D — reservada para multicast IPv4)
-- **Porta UDP:** `5001`
-- **Sender:** `DatagramSocket` comum — qualquer socket pode enviar para um grupo multicast
-- **Receiver:** `MulticastSocket` com `joinGroup()` — necessário para receber pacotes do grupo
-
-### `ClienteMulticast`
-
-Thread *daemon* iniciada logo após o login bem-sucedido. Fica em loop com `setSoTimeout(1000ms)` para checar o flag `volatile boolean ativo` sem bloquear indefinidamente.
-
-Ao receber um pacote, desserializa o JSON e roteia pelo campo `tipo`:
-
-- `"AVISO"` → exibe caixa de uma linha com remetente e hora
-- `"TIMES"` → exibe caixa multi-linha com todos os times e médias
-
-O buffer de recepção é de **8192 bytes** para acomodar mensagens de times com muitos jogadores.
-
-### Fluxo de encerramento
-
-```
-Admin envia ENCERRAR_REQ
-    └─► Servidor gera times (snake draft)
-    └─► TCP ENCERRAR_RESP  ──► Admin vê os times na CLI
-    └─► UDP AVISO          ──► "Avaliações encerradas!"  (todos os clientes)
-    └─► UDP TIMES          ──► Resultado completo        (todos os clientes)
-```
-
----
-
-## Estrutura do Projeto
-
-```
-Racha-Distribuidos/
-├── src/
-│   ├── models/
-│   │   ├── Usuario.java          # Classe base com id, nome, senha
-│   │   ├── Jogador.java          # POJO com posição, notas, média
-│   │   ├── Administrador.java    # POJO com nível de acesso
-│   │   └── Time.java             # Container de jogadores (snake draft)
-│   ├── streams/
-│   │   ├── JogadorOutputStream.java   # Serialização binária customizada
-│   │   └── JogadorInputStream.java    # Desserialização binária customizada
-│   ├── network/
-│   │   ├── Protocolo.java             # Constantes de opcodes e endereços
-│   │   ├── ServidorMultiThread.java   # Servidor TCP + emissor UDP multicast
-│   │   ├── ManipuladorCliente.java    # Handler por conexão (Runnable)
-│   │   ├── ClienteInterativo.java     # CLI do cliente (jogador e admin)
-│   │   └── ClienteMulticast.java      # Receptor UDP multicast (daemon)
-│   ├── utils/
-│   │   └── JsonMensagem.java          # Serialização/desserialização JSON manual
-│   └── testes/
-│       └── TesteFase5.java            # Testes automatizados do protocolo TCP
-├── compile.bat    # Compila todos os fontes para out/
-├── servidor.bat   # Inicia ServidorMultiThread
-└── cliente.bat    # Inicia ClienteInterativo
-```
 
 ## Como compilar e executar
 
 **Pré-requisito:** JDK 17+ instalado.
 
 ```bat
-:: Compilar
+:: 1. Compilar
 compile.bat
 
-:: Iniciar servidor (manter aberto)
+:: 2. Iniciar servidor (mantém aberto, escuta na porta 1099)
 servidor.bat
 
-:: Iniciar um ou mais clientes (em terminais separados)
+:: 3. Iniciar um ou mais clientes em terminais separados
 cliente.bat
 ```
 
-## Fases de Desenvolvimento
+Argumentos opcionais:
 
-- [x] Fase 1 — Setup inicial e estrutura de diretórios
-- [x] Fase 2 — Modelagem de dados (POJOs) e interfaces
-- [x] Fase 3 — Streams customizados (`JogadorOutputStream` / `JogadorInputStream`)
-- [x] Fase 4 — Sockets básicos e serialização manual (protocolo binário TCP)
-- [x] Fase 5 — Servidor multi-threaded com CLI para jogador e administrador
-- [x] Fase 6 — Multicast UDP, JSON manual, senha mestra e envio de times ao encerrar
+```bat
+servidor.bat 5099            :: usa porta 5099 no Registry
+cliente.bat   localhost 5099 :: conecta na porta especificada
+```
+
+---
+
+## Testes
+
+Três suítes, todas executáveis sem rede externa nem JUnit:
+
+```bat
+java -cp out testes.TesteMarshalling   :: 41 asserts — round-trip JSON e envelopes
+java -cp out testes.TesteRMIDummy      :: 7 asserts  — ClienteRMI isolado contra dummies
+java -cp out testes.TesteIntegracao    :: 34 asserts — ponta-a-ponta no servidor real,
+                                          ::             cobre todos os methodIds + callback
+```
+
+`TesteIntegracao` sobe o `ServicoRachaImpl` real *in-process* em uma porta livre, executa LOGIN (admin e jogador), LISTAR (omissão do próprio jogador), AVALIAR (sucesso, duplicado, auto), ADICIONAR/REMOVER (admin), AVISO (com callback), ENCERRAR (gera Racha + 2 times) e LOGOUT — incluindo os caminhos de erro de autorização e de sistema encerrado.
+
+---
+
+## Conformidade com o enunciado
+
+- ✅ **"Não crie sockets nesse trabalho"**: zero uso direto de `Socket`/`DatagramSocket`/`ServerSocket` no caminho RMI. O `rmiregistry` é responsabilidade do JDK.
+- ✅ **doOperation/getRequest/sendReply seguidas**: as três primitivas estão visíveis em `ClienteRMI.doOperation`, e no servidor o ciclo `desempacotar → dispatcher → empacotar` é explícito em `ServicoRachaImpl.invocar` / `SessaoRemotaImpl.invocar`.
+- ✅ **Estrutura `{messageType, requestId, objectReference, methodId, arguments}`**: implementada literalmente em `rmi/RequestMessage.java` e o complemento em `rmi/ReplyMessage.java`, com `messageType=0` para Request e `messageType=1` para Reply.
+- ✅ **`requestId` único e validado**: gerado por `AtomicInteger` no cliente, ecoado pelo servidor, conferido em `ClienteRMI.doOperation` — divergência lança `RemoteException`.
+- ✅ **Multicast removido do caminho ativo**: substituído por callbacks `NotificadorCliente`. O `ClienteMulticast` legado fica em `network/` apenas como referência histórica.
+
+---
+
+## Fases do desenvolvimento
+
+- [x] **Fase 0** — Kickoff: contrato (`CONTRATO.md`)
+- [x] **Fase 1a** — Infra RMI: `RequestMessage`, `ReplyMessage`, `Marshaller`, interfaces `Remote`
+- [x] **Fase 1b** — Domínio: `Sessao`, `Racha`, reuso das entidades do Trabalho 1
+- [x] **Fase 2a** — `ClienteRMI.doOperation`, scripts, smoke test
+- [x] **Fase 2b** — `ServicoRachaImpl` com dispatcher + LOGIN + LISTAR
+- [x] **Fase 3**  — Demais métodos: AVALIAR, ADICIONAR, REMOVER, AVISO, ENCERRAR
+- [x] **Fase 4**  — Callbacks `NotificadorCliente` substituindo multicast UDP
+- [x] **Fase 5**  — Teste de integração completo, CLI polida, relatório (`RELATORIO.md`)

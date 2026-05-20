@@ -54,7 +54,7 @@ public class TesteRMIDummy {
         }
 
         System.out.println("\n=== Resultado: " + passou + " passou, " + falhou + " falhou ===");
-        if (falhou > 0) System.exit(1);
+        System.exit(falhou > 0 ? 1 : 0);
     }
 
     // ── Casos ────────────────────────────────────────────────────────────────
