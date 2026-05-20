@@ -24,4 +24,10 @@ public final class RequestMessage {
     public RequestMessage(int requestId, RemoteObjectRef ref, int methodId, byte[] arguments) {
         this(requestId, ref.getNome(), methodId, arguments);
     }
+
+    public int    getRequestId()       { return requestId; }
+    public int    getMethodId()        { return methodId; }
+    public String getObjectReference() { return objectReference; }
+    public byte[] getArguments()       { return arguments; }
+    public byte   getMessageType()     { return messageType; }
 }

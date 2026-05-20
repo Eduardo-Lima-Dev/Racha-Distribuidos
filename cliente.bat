@@ -4,7 +4,7 @@ set JAVA=%JAVA_HOME%\bin\java.exe
 
 pushd %~dp0
 
-echo === Cliente Interativo (Fase 5) ===
-"%JAVA%" -cp "out" network.ClienteInterativo
+echo === Cliente RMI - Divisao de Times (Trabalho 2) ===
+"%JAVA%" -cp "out" client.ClienteInterativo %*
 
 popd

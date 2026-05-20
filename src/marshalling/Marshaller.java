@@ -29,6 +29,16 @@ public final class Marshaller {
         return Json.escrever(env).getBytes(StandardCharsets.UTF_8);
     }
 
+    /** Alias para {@link #desempacotarRequest(byte[])} usado pelos dispatchers do servidor. */
+    public static RequestMessage desempacotar(byte[] bytes) {
+        return desempacotarRequest(bytes);
+    }
+
+    /** Alias para {@link #empacotar(ReplyMessage)} usado pelos dispatchers do servidor. */
+    public static byte[] empacotarReply(ReplyMessage msg) {
+        return empacotar(msg);
+    }
+
     public static RequestMessage desempacotarRequest(byte[] bytes) {
         Map<String, Object> env = Json.lerObjeto(new String(bytes, StandardCharsets.UTF_8));
 

@@ -5,9 +5,9 @@ import java.nio.charset.StandardCharsets;
 /**
  * Mensagem de resposta do protocolo req-resp (Fig. 5.4 do livro-texto).
  *
- * Semântica do campo {@code arguments} muda conforme {@code ok}:
- *   ok=true  → bytes UTF-8 do JSON do resultado (objeto)
- *   ok=false → bytes UTF-8 da string-motivo (não é JSON)
+ * O servidor encapsula o payload de sucesso/erro de negócio dentro de
+ * {@code arguments} (JSON com chave {@code ok}). O campo booleano {@code ok}
+ * aqui denota apenas o sucesso a nível de protocolo (envelope bem-formado).
  */
 public final class ReplyMessage {
 
@@ -25,6 +25,14 @@ public final class ReplyMessage {
         this.arguments   = arguments == null ? new byte[0] : arguments;
     }
 
+    /** Construtor usado pelos dispatchers do servidor (B's convention). */
+    public ReplyMessage(int messageType, int requestId, byte[] arguments) {
+        this.messageType = (byte) messageType;
+        this.requestId   = requestId;
+        this.ok          = true;
+        this.arguments   = arguments == null ? new byte[0] : arguments;
+    }
+
     public static ReplyMessage ok(int requestId, byte[] resultJsonBytes) {
         return new ReplyMessage(requestId, true, resultJsonBytes);
     }
@@ -33,6 +41,11 @@ public final class ReplyMessage {
         byte[] bytes = motivo == null ? new byte[0] : motivo.getBytes(StandardCharsets.UTF_8);
         return new ReplyMessage(requestId, false, bytes);
     }
+
+    public int    getRequestId() { return requestId; }
+    public byte[] getArguments() { return arguments; }
+    public byte   getMessageType() { return messageType; }
+    public boolean isOk() { return ok; }
 
     public String motivo() {
         if (ok) return null;

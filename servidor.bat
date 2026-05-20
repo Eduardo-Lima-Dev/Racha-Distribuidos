@@ -4,7 +4,7 @@ set JAVA=%JAVA_HOME%\bin\java.exe
 
 pushd %~dp0
 
-echo === Servidor Multi-Thread (Fase 5 - porta 5000) ===
-"%JAVA%" -cp "out" network.ServidorMultiThread
+echo === Servidor RMI - Divisao de Times (Trabalho 2) ===
+"%JAVA%" -cp "out" server.MainServidor %*
 
 popd
